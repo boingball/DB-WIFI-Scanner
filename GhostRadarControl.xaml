@@ -1,0 +1,68 @@
+﻿<UserControl x:Class="DB_WIFI_Scanner.GhostRadarControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:DB_WIFI_Scanner"
+             Width="400" Height="400">
+
+	<UserControl.Resources>
+		<TextEffectCollection x:Key="GlowEffect">
+			<TextEffect PositionStart="0" PositionCount="100">
+				<TextEffect.Foreground>
+					<RadialGradientBrush GradientOrigin="0.5,0.5">
+						<GradientStop Color="White" Offset="0" />
+						<GradientStop Color="Lime" Offset="1" />
+					</RadialGradientBrush>
+				</TextEffect.Foreground>
+			</TextEffect>
+		</TextEffectCollection>
+	</UserControl.Resources>
+
+	<Grid Background="Black">
+		<Grid.Effect>
+			<DropShadowEffect Color="Lime" BlurRadius="10" ShadowDepth="0"/>
+		</Grid.Effect>
+
+		<Rectangle Fill="Transparent">
+			<Rectangle.OpacityMask>
+				<VisualBrush TileMode="Tile" Viewport="0,0,1,4" ViewportUnits="Absolute" Viewbox="0,0,1,4" ViewboxUnits="Absolute">
+					<VisualBrush.Visual>
+						<Rectangle Fill="Lime" Height="1" Width="1" />
+					</VisualBrush.Visual>
+				</VisualBrush>
+			</Rectangle.OpacityMask>
+		</Rectangle>
+
+		<Border BorderBrush="Lime" BorderThickness="3" CornerRadius="10" Margin="4">
+			<Canvas x:Name="RadarCanvas" Background="#FF000800">
+				<!-- Blips, grid, and sweep beam drawn in code -->
+				<Line x:Name="SweepBeam" Stroke="Lime" StrokeThickness="2" Opacity="0.3" />
+			</Canvas>
+		</Border>
+
+		<!-- Red alert overlay -->
+		<Rectangle x:Name="AlertOverlay" Fill="Red" Opacity="0"/>
+
+		<!-- Ghost capture message -->
+		<TextBlock x:Name="CaptureText" Text="GHOST CAPTURED!"
+                   FontSize="26" FontWeight="Bold" Foreground="White"
+                   Visibility="Collapsed"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   TextEffects="{StaticResource GlowEffect}"/>
+
+		<!-- HyperScan Toggle -->
+		<CheckBox x:Name="HyperScanCheckBoxInternal" Content="🌀 Unleash Ghost Cyclotron"
+                  HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10"
+                  Foreground="Lime" FontWeight="Bold"
+                  Checked="HyperScanCheckBoxChanged" Unchecked="HyperScanCheckBoxChanged"/>
+
+		<ListBox x:Name="GhostListBox"
+				 HorizontalAlignment="Right" VerticalAlignment="Top"
+				 Margin="0,10,10,0" Width="140" MaxHeight="150"
+				 Background="#22000000" Foreground="Lime"
+				 BorderBrush="Lime" BorderThickness="1"
+				 FontSize="10" FontWeight="Bold"
+				 ScrollViewer.VerticalScrollBarVisibility="Disabled"
+				 ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
+
+	</Grid>
+</UserControl>
