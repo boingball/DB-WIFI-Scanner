@@ -341,7 +341,6 @@ namespace DB_WIFI_Scanner
             WlanCloseHandle(clientHandle, IntPtr.Zero);
             return networks;
         }
-
         private int ConvertRssiToQuality(int rssi)
         {
             if (rssi <= -100) return 0;
