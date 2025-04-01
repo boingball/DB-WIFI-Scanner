@@ -43,7 +43,7 @@
 		<Rectangle x:Name="AlertOverlay" Fill="Red" Opacity="0"/>
 
 		<!-- Ghost capture message -->
-		<TextBlock x:Name="CaptureText" Text="GHOST CAPTURED!"
+		<TextBlock x:Name="CaptureText" Text="AP DETECTED!"
                    FontSize="26" FontWeight="Bold" Foreground="White"
                    Visibility="Collapsed"
                    HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -54,8 +54,13 @@
                   HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10"
                   Foreground="Lime" FontWeight="Bold"
                   Checked="HyperScanCheckBoxChanged" Unchecked="HyperScanCheckBoxChanged"/>
+        <StackPanel Orientation="Horizontal" Margin="5">
+            <TextBlock Text="Capture RSSI" Foreground="Lime" Margin="0,0,5,0" Height="354" Width="71"/>
+            <Slider x:Name="RssiThresholdSlider" Minimum="-60" Maximum="-20" Value="-30" Width="115" TickFrequency="5" IsSnapToTickEnabled="True" Height="352"/>
+            <TextBlock x:Name="RssiValueText" Text="-30 dBm" Foreground="Lime" Margin="5,0,0,0" Height="353"/>
+        </StackPanel>
 
-		<ListBox x:Name="GhostListBox"
+        <ListBox x:Name="GhostListBox"
 				 HorizontalAlignment="Right" VerticalAlignment="Top"
 				 Margin="0,10,10,0" Width="140" MaxHeight="150"
 				 Background="#22000000" Foreground="Lime"

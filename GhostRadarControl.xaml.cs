@@ -6,6 +6,7 @@ using System.Timers;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 
 namespace DB_WIFI_Scanner
@@ -18,10 +19,16 @@ namespace DB_WIFI_Scanner
         private const int RadarRadius = 180;
         private const int CenterX = 200;
         private const int CenterY = 200;
+        private Dictionary<string, Point> previousBlipPositions = new();
+        private const double InterpolationSpeed = 0.15; // tweak for speed
         public CheckBox HyperScanCheckBox => HyperScanCheckBoxInternal;
         private System.Windows.Threading.DispatcherTimer sweepTimer;
         private System.Timers.Timer scanTriggerTimer;
         private Line sweepBeam;
+        bool ghostClose = false;
+        private Dictionary<string, string> knownGhosts = new Dictionary<string, string>();
+        private Dictionary<string, List<Point>> blipTrails = new();
+        private const int MaxTrailLength = 5;
 
         public GhostRadarControl()
         {
@@ -41,10 +48,16 @@ namespace DB_WIFI_Scanner
                     DrawBlips();
                 });
             };
+
+            RssiThresholdSlider.ValueChanged += (s, e) =>
+            {
+                RssiValueText.Text = $"{(int)RssiThresholdSlider.Value} dBm";
+            };
             refreshTimer.Start();
             scanTriggerTimer = new System.Timers.Timer(5000); // every 5 sec
             scanTriggerTimer.Elapsed += (s, e) => ForceWifiRescan();
             scanTriggerTimer.Start();
+
 
             this.Unloaded += GhostRadarControl_Unloaded;
         }
@@ -83,6 +96,14 @@ namespace DB_WIFI_Scanner
             {
                 // ignore scan failures
             }
+        }
+
+        private Point Lerp(Point from, Point to)
+        {
+            return new Point(
+                from.X + (to.X - from.X) * InterpolationSpeed,
+                from.Y + (to.Y - from.Y) * InterpolationSpeed
+            );
         }
 
         private void HyperScanCheckBoxChanged(object sender, RoutedEventArgs e)
@@ -136,24 +157,223 @@ namespace DB_WIFI_Scanner
             networks = latest;
         }
 
+        private int GetCaptureThreshold()
+        {
+            return RssiThresholdSlider != null ? (int)RssiThresholdSlider.Value : -30;
+        }
+
+        private void DrawBlips()
+        {
+            if (knownGhosts == null)
+                knownGhosts = new Dictionary<string, string>();
+
+            var currentKeys = networks.Select(n => n.BSSID).ToHashSet();
+            var previousLabels = RadarCanvas.Children.OfType<TextBlock>().Where(e => (string)e.Tag == "label").ToList();
+            var previousBlips = RadarCanvas.Children.OfType<Ellipse>().Where(e => (string)e.Tag == "blip").ToList();
+            var closestNet = networks.OrderByDescending(n => n.RSSI).FirstOrDefault(); // RSSI is in dBm: higher = stronger
+            string closestBssid = closestNet?.BSSID;
+
+            foreach (var blip in previousBlips) RadarCanvas.Children.Remove(blip);
+            foreach (var label in previousLabels) RadarCanvas.Children.Remove(label);
+
+            GhostListBox.Items.Clear();
+
+            bool ghostClose = false;
+            string detectedApLabel = null;
+
+            foreach (var net in networks)
+            {
+                int rssi = net.RSSI;
+                double distance = MapRssiToRadius(rssi) + (rng.NextDouble() * 2 - 1);
+                double angle = GetStableAngleFromBssid(net.BSSID);
+                double x = CenterX + distance * Math.Cos(angle);
+                double y = CenterY + distance * Math.Sin(angle);
+
+                if (!knownGhosts.ContainsKey(net.BSSID))
+                {
+                    knownGhosts[net.BSSID] = $"AP-{knownGhosts.Count + 1}";
+                }
+
+                string apLabel = knownGhosts[net.BSSID];
+
+                Brush fill;
+                Brush stroke = Brushes.White;
+
+                int threshold = GetCaptureThreshold();
+                if (rssi > threshold)
+                {
+                    fill = Brushes.Red;
+                    stroke = Brushes.OrangeRed;
+                    ghostClose = true;
+                    detectedApLabel = apLabel;
+                }
+                else if (rssi > threshold - 5)
+                    fill = Brushes.Orange;
+                else if (rssi > threshold - 20)
+                    fill = Brushes.YellowGreen;
+                else if (rssi > threshold - 30)
+                    fill = Brushes.LimeGreen;
+                else if (rssi > threshold - 40)
+                    fill = Brushes.Teal;
+                else
+                    fill = Brushes.DarkSlateGray;
+
+                bool isClosest = net.BSSID == closestBssid;
+
+                // Fake '3D' projection for closest AP
+                if (net.BSSID == closestBssid)
+                {
+                    double forwardBias = Math.PI / 2; // aim downward
+                    angle = (angle + forwardBias) / 2.0;
+                }
+
+                var blip = new Ellipse
+                {
+                    Width = isClosest ? 16 : 10,
+                    Height = isClosest ? 16 : 10,
+                    Fill = fill,
+                    Stroke = isClosest ? Brushes.WhiteSmoke : stroke,
+                    StrokeThickness = isClosest ? 2.0 : 0.8,
+                    Opacity = isClosest ? 1.0 : 0.8,
+                    Tag = "blip"
+                };
+
+                if (isClosest)
+                {
+                    blip.Effect = new DropShadowEffect
+                    {
+                        Color = Colors.Red,
+                        BlurRadius = 15,
+                        ShadowDepth = 0,
+                        Opacity = 0.6
+                    };
+                }
+
+                Point current = new(x, y);
+                if (previousBlipPositions.TryGetValue(net.BSSID, out var prev))
+                    current = Lerp(prev, current);
+                previousBlipPositions[net.BSSID] = current;
+
+                if (!blipTrails.ContainsKey(net.BSSID))
+                    blipTrails[net.BSSID] = new List<Point>();
+
+                var trail = blipTrails[net.BSSID];
+                trail.Add(current);
+                if (trail.Count > MaxTrailLength)
+                    trail.RemoveAt(0);
+
+                // Draw trail points
+                for (int t = 0; t < trail.Count; t++)
+                {
+                    var p = trail[t];
+                    var ghostTrail = new Ellipse
+                    {
+                        Width = 4,
+                        Height = 4,
+                        Fill = new SolidColorBrush(Color.FromArgb((byte)(40 + 40 * t), 0, 255, 0)),
+                        Stroke = Brushes.Transparent,
+                        Tag = "trail"
+                    };
+                    Canvas.SetLeft(ghostTrail, p.X - 2);
+                    Canvas.SetTop(ghostTrail, p.Y - 2);
+                    RadarCanvas.Children.Add(ghostTrail);
+                }
+                RadarCanvas.Children.OfType<Ellipse>()
+                .Where(e => e.Tag as string == "trail")
+                .ToList()
+                .ForEach(e => RadarCanvas.Children.Remove(e));
+
+                bool pulse = rssi > GetCaptureThreshold() + 2; // really close!
+                if (pulse)
+                {
+                    blip.Effect = new System.Windows.Media.Effects.DropShadowEffect
+                    {
+                        Color = Colors.Red,
+                        BlurRadius = 20,
+                        ShadowDepth = 0,
+                        Opacity = 0.8
+                    };
+                }
+
+                Canvas.SetLeft(blip, current.X - 4);
+                Canvas.SetTop(blip, current.Y - 4);
+
+                Canvas.SetLeft(blip, x - blip.Width / 2);
+                Canvas.SetTop(blip, y - blip.Height / 2);
+                RadarCanvas.Children.Add(blip);
+
+                var label = new TextBlock
+                {
+                    Text = apLabel,
+                    Foreground = Brushes.Lime,
+                    FontSize = 10,
+                    FontWeight = FontWeights.Bold,
+                    Tag = "label"
+                };
+                Canvas.SetLeft(label, x + 6);
+                Canvas.SetTop(label, y - 6);
+                RadarCanvas.Children.Add(label);
+
+                GhostListBox.Items.Add($"{apLabel}: {net.SSID} ({rssi} dBm)");
+            }
+
+            SetGhostCaptureState(ghostClose, detectedApLabel);
+        }
+
+        private void SetGhostCaptureState(bool active, string apLabel)
+        {
+            if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+
+            Dispatcher.Invoke(() =>
+            {
+                AlertOverlay.Opacity = active ? 0.6 : 0;
+                CaptureText.Text = active && apLabel != null ? $"GHOST-AP CAPTURED!\n{apLabel} found" : "GHOSTAP CAPTURED!";
+                CaptureText.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+            });
+        }
+
+        private double MapRssiToRadius(int rssi)
+        {
+            int threshold = GetCaptureThreshold(); // e.g., -30
+            int minRssi = -90;                     // weakest signal we'll consider
+            int maxRssi = threshold;              // strongest signal (user-controlled)
+
+            // Ensure rssi is within bounds
+            int clamped = Math.Max(minRssi, Math.Min(maxRssi, rssi));
+
+            // Inverted ratio: higher RSSI (closer to 0) means smaller distance
+            double ratio = 1.0 - ((clamped - minRssi) / (double)(maxRssi - minRssi));
+            return ratio * RadarRadius;
+        }
+
         private void DrawGrid()
         {
             RadarCanvas.Children.Clear();
 
-            // Draw concentric circles
-            for (int r = 30; r <= RadarRadius; r += 30)
+            // Draw concentric colored zone rings
+            var bands = new[]
             {
-                var circle = new Ellipse
+        new { Radius = 10, Color = Colors.Red },
+        new { Radius = 40, Color = Colors.Orange },
+        new { Radius = 80, Color = Colors.YellowGreen },
+        new { Radius = 120, Color = Colors.LimeGreen },
+        new { Radius = 150, Color = Colors.Teal },
+        new { Radius = 175, Color = Colors.DarkSlateGray }
+    };
+
+            foreach (var band in bands)
+            {
+                var ring = new Ellipse
                 {
-                    Width = r * 2,
-                    Height = r * 2,
-                    Stroke = Brushes.Green,
-                    StrokeThickness = 0.5,
-                    Opacity = 0.2
+                    Width = band.Radius * 2,
+                    Height = band.Radius * 2,
+                    Stroke = new SolidColorBrush(band.Color),
+                    StrokeThickness = 1.2,
+                    Opacity = 0.25
                 };
-                Canvas.SetLeft(circle, CenterX - r);
-                Canvas.SetTop(circle, CenterY - r);
-                RadarCanvas.Children.Add(circle);
+                Canvas.SetLeft(ring, CenterX - band.Radius);
+                Canvas.SetTop(ring, CenterY - band.Radius);
+                RadarCanvas.Children.Add(ring);
             }
 
             // Draw crosshairs
@@ -194,108 +414,15 @@ namespace DB_WIFI_Scanner
             return normalized * 2 * Math.PI;
         }
 
-        private void DrawBlips()
-        {
-            // Track previous SSIDs to detect removals
-            var currentKeys = networks.Select(n => n.BSSID).ToHashSet();
-            var previousLabels = RadarCanvas.Children.OfType<TextBlock>().Where(e => (string)e.Tag == "label").ToList();
-            var previousBlips = RadarCanvas.Children.OfType<Ellipse>().Where(e => (string)e.Tag == "blip").ToList();
-
-            foreach (var blip in previousBlips) RadarCanvas.Children.Remove(blip);
-            foreach (var label in previousLabels) RadarCanvas.Children.Remove(label);
-
-            GhostListBox.Items.Clear();
-
-            if (networks == null || networks.Count == 0) return;
-
-            int index = 1;
-            foreach (var net in networks)
-            {
-                int rssi = net.RSSI;
-                double distance = MapRssiToRadius(rssi) + (rng.NextDouble() * 2 - 1); // ±1 pixel ghost drift
-                double angle = GetStableAngleFromBssid(net.BSSID);
-
-                double x = CenterX + distance * Math.Cos(angle);
-                double y = CenterY + distance * Math.Sin(angle);
-
-                bool isClose = rssi > -35;
-
-                var blip = new Ellipse
-                {
-                    Width = isClose ? 12 : 8,
-                    Height = isClose ? 12 : 8,
-                    Fill = isClose ? Brushes.Red : Brushes.LimeGreen,
-                    Stroke = isClose ? Brushes.OrangeRed : Brushes.White,
-                    StrokeThickness = 0.5,
-                    Tag = "blip"
-                };
-
-                Canvas.SetLeft(blip, x - blip.Width / 2);
-                Canvas.SetTop(blip, y - blip.Height / 2);
-                RadarCanvas.Children.Add(blip);
-
-                var label = new TextBlock
-                {
-                    Text = $"AP-{index}",
-                    Foreground = Brushes.Lime,
-                    FontSize = 10,
-                    FontWeight = FontWeights.Bold,
-                    Tag = "label"
-                };
-                Canvas.SetLeft(label, x + 6);
-                Canvas.SetTop(label, y - 6);
-                RadarCanvas.Children.Add(label);
-
-                GhostListBox.Items.Add($"AP-{index}: {net.SSID}");
-
-                if (isClose)
-                {
-                    TriggerGhostCapture();
-                }
-
-                index++;
-            }
-        }
-
-
-        private double MapRssiToRadius(int rssi)
-        {
-            // RSSI Range: -90 (far) to -35 (very close)
-            const int minRSSI = -90;
-            const int maxRSSI = -35;
-
-            // Clamp RSSI to expected range
-            int clamped = Math.Max(minRSSI, Math.Min(maxRSSI, rssi));
-
-            // Invert so that stronger signal = smaller radius (closer to center)
-            double ratio = (clamped - maxRSSI) / (double)(minRSSI - maxRSSI); // 0 = -35 (center), 1 = -90 (edge)
-
-            // Push it inward slightly to avoid edge
-            return 5 + (ratio * (RadarRadius - 5));
-        }
-
-
-        private void TriggerGhostCapture()
+        private void SetGhostCaptureState(bool active)
         {
             if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
 
             Dispatcher.Invoke(() =>
             {
-                AlertOverlay.Opacity = 0.6;
-                CaptureText.Visibility = Visibility.Visible;
+                AlertOverlay.Opacity = active ? 0.6 : 0;
+                CaptureText.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
             });
-
-            var timer = new System.Timers.Timer(1000);
-            timer.Elapsed += (s, e) =>
-            {
-                Dispatcher.Invoke(() =>
-                {
-                    AlertOverlay.Opacity = 0;
-                    CaptureText.Visibility = Visibility.Collapsed;
-                });
-                timer.Stop();
-            };
-            timer.Start();
         }
     }
 }

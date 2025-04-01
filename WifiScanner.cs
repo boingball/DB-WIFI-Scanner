@@ -11,6 +11,8 @@ namespace DB_WIFI_Scanner
         public int SignalQuality { get; set; } // 0-100
         public string BSSID { get; set; }
         public int RSSI { get; set; } // in dBm
+
+        public DateTime LastSeen { get; set; } = DateTime.UtcNow;
     }
 
     public class WifiScanner
