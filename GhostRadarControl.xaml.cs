@@ -29,6 +29,7 @@ namespace DB_WIFI_Scanner
         private Dictionary<string, string> knownGhosts = new Dictionary<string, string>();
         private Dictionary<string, List<Point>> blipTrails = new();
         private const int MaxTrailLength = 5;
+        private string focusedBssid = null;
 
         public GhostRadarControl()
         {
@@ -97,7 +98,10 @@ namespace DB_WIFI_Scanner
                 // ignore scan failures
             }
         }
-
+        public void FocusOnBssid(string bssid)
+        {
+            focusedBssid = bssid;
+        }
         private Point Lerp(Point from, Point to)
         {
             return new Point(
@@ -185,10 +189,11 @@ namespace DB_WIFI_Scanner
             {
                 int rssi = net.RSSI;
                 double distance = MapRssiToRadius(rssi) + (rng.NextDouble() * 2 - 1);
-                double angle = GetStableAngleFromBssid(net.BSSID);
+                double angle = GetStableAngleFromBssid(net.BSSID, net.SSID);
                 double x = CenterX + distance * Math.Cos(angle);
                 double y = CenterY + distance * Math.Sin(angle);
-
+                if (!string.IsNullOrEmpty(focusedBssid) && net.BSSID != focusedBssid)
+                    continue;
                 if (!knownGhosts.ContainsKey(net.BSSID))
                 {
                     knownGhosts[net.BSSID] = $"AP-{knownGhosts.Count + 1}";
@@ -405,13 +410,15 @@ namespace DB_WIFI_Scanner
             RadarCanvas.Children.Add(sweepBeam);
         }
 
-        private double GetStableAngleFromBssid(string bssid)
+        private double GetStableAngleFromBssid(string bssid, string ssid = null)
         {
-            if (string.IsNullOrWhiteSpace(bssid)) return rng.NextDouble() * 2 * Math.PI;
+            string id = !string.IsNullOrWhiteSpace(bssid) && !bssid.Contains("virtual")
+                ? bssid
+                : ssid ?? Guid.NewGuid().ToString();
 
-            int hash = bssid.GetHashCode();
-            double normalized = (hash & 0x7FFFFFFF) / (double)int.MaxValue; // 0 to 1
-            return normalized * 2 * Math.PI;
+            int hash = id.GetHashCode();
+            double normalized = (hash & 0x7FFFFFFF) / (double)int.MaxValue; // Normalize to 0-1
+            return normalized * 2 * Math.PI; // Convert to full circle angle
         }
 
         private void SetGhostCaptureState(bool active)

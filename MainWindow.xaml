@@ -5,9 +5,12 @@
         Title="Wi-Fi Ghost Tracker" Height="792" Width="500">
 
     <StackPanel Margin="0,0,0,-6">
-        <CheckBox Name="DeepScanCheckBox" Content="Enable Deep Scan (BSSID/RSSI)" Margin="10"/>
+        <CheckBox Name="DeepScanCheckBox" Content="Enable Deep Scan (BSSID/RSSI)" Margin="10" Checked="DeepScanCheckBox_Checked" Unchecked="DeepScanCheckBox_Checked"/>
 
-        <local:GhostRadarControl x:Name="GhostRadar" Width="400" Height="400" Margin="10"/>
-        <ListBox Name="WifiList" FontSize="14" Margin="10"/>
+        <Viewbox Stretch="Uniform">
+            <local:GhostRadarControl x:Name="GhostRadar" />
+        </Viewbox>
+        <Button Content="Show All APs" Click="ClearFocusButton_Click"/>
+        <ListBox Name="WifiList" FontSize="14" Margin="10"  SelectionChanged="WifiList_SelectionChanged"/>
     </StackPanel>
 </Window>

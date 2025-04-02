@@ -192,6 +192,12 @@ namespace DB_WIFI_Scanner
             IHV_End = 0xffffffff
         }
 
+        private int ConvertQualityToRssi(int quality)
+        {
+            // 100 → -30 dBm, 0 → -90 dBm (linear)
+            return -90 + (int)(quality * 0.6);
+        }
+
         public List<WifiNetwork> Scan()
         {
             var networks = new List<WifiNetwork>();
@@ -242,9 +248,15 @@ namespace DB_WIFI_Scanner
                         networks.Add(new WifiNetwork
                         {
                             SSID = ssid,
-                            SignalQuality = (int)net.wlanSignalQuality
+                            SignalQuality = (int)net.wlanSignalQuality,
+                            BSSID = $"{ssid}-virtual",
+                            RSSI = ConvertQualityToRssi((int)net.wlanSignalQuality)
                         });
                     }
+                    networks = networks
+                    .GroupBy(n => n.BSSID ?? n.SSID)
+                    .Select(g => g.First())
+                    .ToList();
                 }
             }
 
